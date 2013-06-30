@@ -1,4 +1,2 @@
-ppj-cpp
-=======
-
-ppjC to FRISC compiler written in C++
+ppjC to FRISC compiler
+======================
