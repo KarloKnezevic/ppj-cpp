@@ -29,6 +29,7 @@ bool parseInt(string s, int &res) {
     res = num;
     if (res != num) return false;
   }
+  res = num;
 
   return true;
 }

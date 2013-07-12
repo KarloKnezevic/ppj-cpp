@@ -10,6 +10,7 @@ using namespace std;
 #include "ast.h"
 #include "types.h"
 #include "symtable.h"
+#include "emit.h"
 
 struct Node {
   string def;
@@ -87,10 +88,39 @@ ASTree *makeAST(Node *node) {
   return ast;
 }
 
+void emitPreamble() {
+  emit("MOVE 40000, R7");
+  emit("CALL FUN_main");
+  emit("HALT");
+
+  emit();
+  emitLabel("MINUS1");
+  emit("DW -1");
+
+  emit();
+  emitLabel("MUL");
+  emit("LOAD R0, (SP+8)");
+  emit("LOAD R1, (SP+4)");
+  emit("MOVE 0, R6");
+  emitLabel("MUL_LOOP");
+  emit("CMP R1, 0");
+  emit("JR_EQ MUL_OUT");
+  emit("AND R1, 1, R2");
+  emit("JP_Z MUL_SKIP");
+  emit("ADD R6, R0, R6");
+  emitLabel("MUL_SKIP");
+  emit("ADD R0, R0, R0");
+  emit("ASHR R1, 1, R1");
+  emit("JR MUL_LOOP");
+  emitLabel("MUL_OUT");
+  emit("RET");
+}
+
 int main() {
   Node *root = readTree();
   ASTree *ast = makeAST(root);
 
+  emitPreamble();
   SymTable *sym = new SymTable(NULL);
   ast->dfs(sym);
 

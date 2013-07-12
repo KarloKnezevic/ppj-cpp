@@ -1,8 +1,8 @@
 CC = g++
 CFLAGS = -O2 -Wall
 
-SRCS = codegen.cpp ast.cpp types.cpp parse.cpp symtable.cpp
-HEADERS = ast.h types.h parse.h symtable.h function.h
+SRCS = codegen.cpp ast.cpp types.cpp parse.cpp symtable.cpp emit.cpp
+HEADERS = ast.h types.h parse.h symtable.h function.h emit.h
 OBJS = $(SRCS:.cpp=.o)
 EXE = codegen
 

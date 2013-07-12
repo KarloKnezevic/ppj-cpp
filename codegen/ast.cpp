@@ -7,6 +7,7 @@ using namespace std;
 #include "types.h"
 #include "parse.h"
 #include "symtable.h"
+#include "emit.h"
 
 void ASTree::check(bool test, string msg = "") {
   if (!test) {
@@ -45,6 +46,8 @@ namespace primarni_izraz {
       type = s->type;
       fun = s->fun;
       l_value = (type & (M_FUNCTION|M_ARRAY|M_CONST)) == 0;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -56,6 +59,8 @@ namespace primarni_izraz {
 
       type = M_INT;
       l_value = false;
+
+      emit("MOVE %%D %d, R6", num);
     }
   };
 
@@ -67,6 +72,8 @@ namespace primarni_izraz {
 
       type = M_CHAR;
       l_value = false;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -79,6 +86,8 @@ namespace primarni_izraz {
       arg_types = new vector<int>(values.size(), M_CHAR);
       type = M_CHAR | M_CONST | M_ARRAY;
       l_value = false;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -119,6 +128,8 @@ namespace postfiks_izraz {
 
       type = t_array->type ^ M_ARRAY;
       l_value = (t_array->type & M_CONST) == 0;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -132,6 +143,8 @@ namespace postfiks_izraz {
 
       type = t->fun->type;
       l_value = false;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -154,6 +167,8 @@ namespace postfiks_izraz {
 
       type = t_izraz->fun->type;
       l_value = false;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -166,6 +181,8 @@ namespace postfiks_izraz {
 
       type = M_INT;
       l_value = false;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
   struct postfiks_izraz__OP_INC : Base {};
@@ -180,6 +197,8 @@ namespace lista_argumenata {
 
       arg_types = new vector<int>;
       arg_types->push_back(t->type);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -193,6 +212,8 @@ namespace lista_argumenata {
 
       t_izraz->dfs(sym);
       arg_types->push_back(t_izraz->type);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -218,6 +239,8 @@ namespace unarni_izraz {
 
       type = M_INT;
       l_value = false;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
   struct OP_INC__unarni_izraz : Base {};
@@ -225,6 +248,7 @@ namespace unarni_izraz {
 
   struct unarni_operator__cast_izraz : ASTree {
     void dfs(SymTable *sym) {
+      ASTree *t_op = adj[0];
       ASTree *t_izraz = adj[1];
 
       t_izraz->dfs(sym);
@@ -232,18 +256,37 @@ namespace unarni_izraz {
 
       type = M_INT;
       l_value = false;
+
+      t_op->dfs(sym);
     }
   };
 }
 
 namespace unarni_operator {
-  struct Base : ASTree {
+  struct PLUS : ASTree {
     void dfs(SymTable *sym) {}
   };
-  struct PLUS : Base {};
-  struct MINUS : Base {};
-  struct OP_TILDA : Base {};
-  struct OP_NEG : Base {};
+
+  struct MINUS : ASTree {
+    void dfs(SymTable *sym) {
+      emit("MOVE 0, R0");
+      emit("SUB R0, R6, R6");
+    }
+  };
+
+  struct OP_TILDA : ASTree {
+    void dfs(SymTable *sym) {
+      emit("LOAD R0, (MINUS1)");
+      emit("XOR R0, R6, R6");
+    }
+  };
+
+  struct OP_NEG : ASTree {
+    void dfs(SymTable *sym) {
+      emitIntToBool();
+      emit("XOR R6, 1, R6");
+    }
+  };
 }
 
 namespace cast_izraz {
@@ -270,6 +313,8 @@ namespace cast_izraz {
       type = t_tip->type;
       fun = t_tip->fun;
       l_value = false;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -336,17 +381,40 @@ namespace multiplikativni_izraz {
 
       t1->dfs(sym);
       check(is_convertible_implicit(t1->type, M_INT));
+      emit("PUSH R6");
 
       t2->dfs(sym);
       check(is_convertible_implicit(t2->type, M_INT));
+      emit("PUSH R6");
 
       type = M_INT;
       l_value = false;
+
+      compute();
+      emit("POP R0");
+      emit("POP R0");
+    }
+
+    virtual void compute() = 0;
+  };
+
+  struct multiplikativni_izraz__OP_PUTA__cast_izraz : Base {
+    void compute() {
+      emit("CALL MUL");
     }
   };
-  struct multiplikativni_izraz__OP_PUTA__cast_izraz : Base {};
-  struct multiplikativni_izraz__OP_DIJELI__cast_izraz : Base {};
-  struct multiplikativni_izraz__OP_MOD__cast_izraz : Base {};
+
+  struct multiplikativni_izraz__OP_DIJELI__cast_izraz : Base {
+    void compute() {
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+    }
+  };
+
+  struct multiplikativni_izraz__OP_MOD__cast_izraz : Base {
+    void compute() {
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+    }
+  };
 }
 
 namespace aditivni_izraz {
@@ -368,16 +436,32 @@ namespace aditivni_izraz {
 
       t1->dfs(sym);
       check(is_convertible_implicit(t1->type, M_INT));
+      emit("PUSH R6");
 
       t2->dfs(sym);
       check(is_convertible_implicit(t2->type, M_INT));
 
       type = M_INT;
       l_value = false;
+
+      emit("POP R0");
+      compute();
+    }
+
+    virtual void compute() = 0;
+  };
+
+  struct aditivni_izraz__PLUS__multiplikativni_izraz : Base {
+    void compute() {
+      emit("ADD R0, R6, R6");
     }
   };
-  struct aditivni_izraz__PLUS__multiplikativni_izraz : Base {};
-  struct aditivni_izraz__MINUS__multiplikativni_izraz : Base {};
+
+  struct aditivni_izraz__MINUS__multiplikativni_izraz : Base {
+    void compute() {
+      emit("SUB R0, R6, R6");
+    }
+  };
 }
 
 namespace odnosni_izraz {
@@ -405,6 +489,8 @@ namespace odnosni_izraz {
 
       type = M_INT;
       l_value = false;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
   struct odnosni_izraz__OP_LT__aditivni_izraz : Base {};
@@ -438,6 +524,8 @@ namespace jednakosni_izraz {
 
       type = M_INT;
       l_value = false;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
   struct jednakosni_izraz__OP_EQ__odnosni_izraz : Base {};
@@ -469,6 +557,8 @@ namespace bin_i_izraz {
 
       type = M_INT;
       l_value = false;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -498,6 +588,8 @@ namespace bin_xili_izraz {
 
       type = M_INT;
       l_value = false;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -527,6 +619,8 @@ namespace bin_ili_izraz {
 
       type = M_INT;
       l_value = false;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -556,6 +650,8 @@ namespace log_i_izraz {
 
       type = M_INT;
       l_value = false;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -585,6 +681,8 @@ namespace log_ili_izraz {
 
       type = M_INT;
       l_value = false;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -615,6 +713,8 @@ namespace izraz_pridruzivanja {
       type = t_left->type;
       fun = t_left->fun;
       l_value = false;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -642,6 +742,8 @@ namespace izraz {
       type = t2->type;
       fun = t2->fun;
       l_value = false;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -733,6 +835,8 @@ namespace naredba_grananja {
       check(is_convertible_implicit(t_if->type, M_INT));
 
       t_then->dfs(sym);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -747,6 +851,8 @@ namespace naredba_grananja {
 
       t_then->dfs(sym);
       t_else->dfs(sym);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -761,6 +867,8 @@ namespace naredba_petlje {
       t_while->dfs(sym);
       check(is_convertible_implicit(t_while->type, M_INT));
       t_do->dfs(sym);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -775,6 +883,8 @@ namespace naredba_petlje {
       t_test->dfs(sym);
       check(is_convertible_implicit(t_test->type, M_INT));
       t_do->dfs(sym);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -791,6 +901,8 @@ namespace naredba_petlje {
       check(is_convertible_implicit(t_test->type, M_INT));
       t_step->dfs(sym);
       t_do->dfs(sym);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -804,6 +916,8 @@ namespace naredba_skoka {
         f = f->dad;
       }
       check(f);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
   struct KR_CONTINUE__TOCKAZAREZ : Base {};
@@ -818,6 +932,8 @@ namespace naredba_skoka {
       }
       check(f);
       check(f->fun->type == M_VOID);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -833,6 +949,8 @@ namespace naredba_skoka {
       }
       check(f);
       check(is_convertible_implicit(t->type, f->fun->type));
+
+      emit("RET");
     }
   };
 }
@@ -879,6 +997,9 @@ namespace definicija_funkcije {
       string name = t_idn->source;
       ASTree *f = sym->get(name);
 
+      emit();
+      emitLabel("FUN_%s", name.c_str());
+
       sym = sym->extend();
       init_args(sym);
 
@@ -907,6 +1028,8 @@ namespace definicija_funkcije {
       ASTree *t = adj[3];
       t->dfs(sym);
       fun->args = *t->arg_types;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -918,6 +1041,8 @@ namespace lista_parametara {
 
       check(sym->getLocal(t->arg_name) == NULL);
       sym->put(t->arg_name, t);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -928,6 +1053,8 @@ namespace lista_parametara {
 
       arg_types = new vector<int>;
       addParam(sym, t);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -941,6 +1068,8 @@ namespace lista_parametara {
 
       t_param->dfs(sym);
       addParam(sym, t_param);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -956,6 +1085,8 @@ namespace deklaracija_parametra {
       check((type & M_VOID) == 0);
 
       arg_name = t_idn->source;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -969,6 +1100,8 @@ namespace deklaracija_parametra {
       check((type & M_VOID) == 0);
 
       arg_name = t_idn->source;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -977,6 +1110,8 @@ namespace lista_deklaracija {
   struct deklaracija : ASTree {
     void dfs(SymTable *sym) {
       adj[0]->dfs(sym);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -984,6 +1119,8 @@ namespace lista_deklaracija {
     void dfs(SymTable *sym) {
       adj[0]->dfs(sym);
       adj[1]->dfs(sym);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -997,6 +1134,8 @@ namespace deklaracija {
       t_tip->dfs(sym);
       t_lista->type_inherited = t_tip->type;
       t_lista->dfs(sym);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -1007,6 +1146,8 @@ namespace lista_init_deklaratora {
       ASTree *t = adj[0];
       t->type_inherited = type_inherited;
       t->dfs(sym);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -1020,6 +1161,8 @@ namespace lista_init_deklaratora {
 
       t_dekl->type_inherited = type_inherited;
       t_dekl->dfs(sym);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -1032,6 +1175,8 @@ namespace init_deklarator {
       t->dfs(sym);
 
       check((t->type & M_CONST) == 0);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -1058,6 +1203,8 @@ namespace init_deklarator {
       } else {
         check(is_convertible_implicit(t_value->type, t_dekl->type));
       }
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -1072,6 +1219,8 @@ namespace izravni_deklarator {
       check(sym->getLocal(name) == NULL);
 
       sym->put(name, this);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -1092,6 +1241,8 @@ namespace izravni_deklarator {
       check(num > 0 && num <= 1024);
 
       array_size = num;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -1110,6 +1261,8 @@ namespace izravni_deklarator {
 
       fun_declared.insert(make_pair(name, fun));
       sym->put(name, this);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -1134,6 +1287,8 @@ namespace izravni_deklarator {
 
       fun_declared.insert(make_pair(name, fun));
       sym->put(name, this);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -1158,6 +1313,8 @@ namespace inicijalizator {
           t = t->adj[0];
         }
       }
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -1166,6 +1323,8 @@ namespace inicijalizator {
       ASTree *t = adj[1];
       t->dfs(sym);
       arg_types = t->arg_types;
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -1178,6 +1337,8 @@ namespace lista_izraza_pridruzivanja {
 
       arg_types = new vector<int>;
       arg_types->push_back(t->type);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -1191,6 +1352,8 @@ namespace lista_izraza_pridruzivanja {
 
       arg_types = t_lista->arg_types;
       arg_types->push_back(t_izraz->type);
+
+      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
