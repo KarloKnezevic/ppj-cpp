@@ -94,10 +94,6 @@ void emitPreamble() {
   emit("HALT");
 
   emit();
-  emitLabel("MINUS1");
-  emit("DW -1");
-
-  emit();
   emitLabel("MUL");
   emit("LOAD R0, (SP+8)");
   emit("LOAD R1, (SP+4)");

@@ -276,7 +276,7 @@ namespace unarni_operator {
 
   struct OP_TILDA : ASTree {
     void dfs(SymTable *sym) {
-      emit("LOAD R0, (MINUS1)");
+      emit("MOVE -1, R0");
       emit("XOR R0, R6, R6");
     }
   };
