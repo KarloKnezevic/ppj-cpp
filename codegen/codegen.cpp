@@ -89,15 +89,18 @@ ASTree *makeAST(Node *node) {
 }
 
 void emitPreamble() {
-  emit("MOVE 40000, R7");
-  emit("CALL FUN_main");
-  emit("HALT");
+  emit("MOVE 40000, SP");
+  emit("JR %s", l_global.c_str());
 
   emit();
   emitLabel("MUL");
   emit("LOAD R0, (SP+8)");
   emit("LOAD R1, (SP+4)");
   emit("MOVE 0, R6");
+  emit("CMP R1, 0");
+  emit("JR_SGE MUL_LOOP");
+  emit("SUB R6, R0, R0");
+  emit("SUB R6, R1, R1");
   emitLabel("MUL_LOOP");
   emit("CMP R1, 0");
   emit("JR_EQ MUL_OUT");
@@ -117,8 +120,14 @@ int main() {
   ASTree *ast = makeAST(root);
 
   emitPreamble();
+
   SymTable *sym = new SymTable(NULL);
   ast->dfs(sym);
+
+  emit();
+  emitLabel(l_global.c_str());
+  emit("CALL FUN_main");
+  emit("HALT");
 
   const string ERR_MAIN = "main";
   const string ERR_FUN = "funkcija";

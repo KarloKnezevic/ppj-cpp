@@ -45,9 +45,17 @@ namespace primarni_izraz {
 
       type = s->type;
       fun = s->fun;
-      l_value = (type & (M_FUNCTION|M_ARRAY|M_CONST)) == 0;
+      l_value = !(type & (M_FUNCTION|M_ARRAY|M_CONST));
+      is_ptr = true;
 
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      if (!(type & M_FUNCTION)) {
+        if (s->is_global_decl) {
+          emit("MOVE G_%s, R6", name.c_str());
+        } else {
+          emit("MOVE R5, R6");
+          emit("SUB R6, %%D %d, R6", s->stack_pos - sym->base_pointer);
+        }
+      }
     }
   };
 
@@ -59,8 +67,11 @@ namespace primarni_izraz {
 
       type = M_INT;
       l_value = false;
+      is_ptr = false;
 
-      emit("MOVE %%D %d, R6", num);
+      emit("MOVE %%D %d, R6", num >> 16);
+      emit("SHL R6, %%D 16, R6");
+      emit("OR R6, %%D %d, R6", num & 0xFFFF);
     }
   };
 
@@ -72,8 +83,9 @@ namespace primarni_izraz {
 
       type = M_CHAR;
       l_value = false;
+      is_ptr = false;
 
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      emit("MOVE %%D %d, R6", num);
     }
   };
 
@@ -86,8 +98,17 @@ namespace primarni_izraz {
       arg_types = new vector<int>(values.size(), M_CHAR);
       type = M_CHAR | M_CONST | M_ARRAY;
       l_value = false;
+      is_ptr = true;
 
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      string l_str = makeLabel();
+      string l_out = makeLabel();
+      emit("JR %s", l_out.c_str());
+      emitLabel(l_str.c_str());
+      for (vector<int>::iterator it = values.begin(); it != values.end(); ++it ) {
+        emit("DW %%D %d", *it);
+      }
+      emitLabel(l_out.c_str());
+      emit("MOVE %s, R6", l_str.c_str());
     }
   };
 
@@ -99,6 +120,7 @@ namespace primarni_izraz {
       type = t->type;
       fun = t->fun;
       l_value = t->l_value;
+      is_ptr = t->is_ptr;
     }
   };
 }
@@ -112,6 +134,7 @@ namespace postfiks_izraz {
       type = t->type;
       fun = t->fun;
       l_value = t->l_value;
+      is_ptr = t->is_ptr;
     }
   };
 
@@ -122,14 +145,21 @@ namespace postfiks_izraz {
 
       t_array->dfs(sym);
       check(t_array->type & M_ARRAY);
+      emit("LOAD R6, (R6)");
+      emit("PUSH R6");
 
       t_index->dfs(sym);
       check(is_convertible_implicit(t_index->type, M_INT));
+      if (t_index->is_ptr) {
+        emit("LOAD R6, (R6)");
+      }
+      emit("POP R0");
+      emit("SHL R6, 2, R6");
+      emit("ADD R6, R0, R6");
 
       type = t_array->type ^ M_ARRAY;
-      l_value = (t_array->type & M_CONST) == 0;
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      l_value = !(t_array->type & M_CONST);
+      is_ptr = true;
     }
   };
 
@@ -143,8 +173,12 @@ namespace postfiks_izraz {
 
       type = t->fun->type;
       l_value = false;
+      is_ptr = false;
 
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      while (!t->adj.empty()) {
+        t = t->adj[0];
+      }
+      emit("CALL FUN_%s", t->source.c_str());
     }
   };
 
@@ -167,8 +201,13 @@ namespace postfiks_izraz {
 
       type = t_izraz->fun->type;
       l_value = false;
+      is_ptr = false;
 
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      while (!t_izraz->adj.empty()) {
+        t_izraz = t_izraz->adj[0];
+      }
+      emit("CALL FUN_%s", t_izraz->source.c_str());
+      emit("ADD SP, %%D %d, SP", v1.size() * 4);
     }
   };
 
@@ -181,12 +220,28 @@ namespace postfiks_izraz {
 
       type = M_INT;
       l_value = false;
+      is_ptr = false;
 
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      emit("LOAD R0, (R6)");
+      compute();
+      emit("STORE R1, (R6)");
+      emit("MOVE R0, R6");
+    }
+
+    virtual void compute() = 0;
+  };
+
+  struct postfiks_izraz__OP_INC : Base {
+    void compute() {
+      emit("ADD R0, 1, R1");
     }
   };
-  struct postfiks_izraz__OP_INC : Base {};
-  struct postfiks_izraz__OP_DEC : Base {};
+
+  struct postfiks_izraz__OP_DEC : Base {
+    void compute() {
+      emit("SUB R0, 1, R1");
+    }
+  };
 }
 
 namespace lista_argumenata {
@@ -198,7 +253,10 @@ namespace lista_argumenata {
       arg_types = new vector<int>;
       arg_types->push_back(t->type);
 
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      if (t->is_ptr) {
+        emit("LOAD R6, (R6)");
+      }
+      emit("PUSH R6");
     }
   };
 
@@ -213,7 +271,10 @@ namespace lista_argumenata {
       t_izraz->dfs(sym);
       arg_types->push_back(t_izraz->type);
 
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      if (t_izraz->is_ptr) {
+        emit("LOAD R6, (R6)");
+      }
+      emit("PUSH R6");
     }
   };
 }
@@ -227,24 +288,42 @@ namespace unarni_izraz {
       type = t->type;
       fun = t->fun;
       l_value = t->l_value;
+      is_ptr = t->is_ptr;
     }
   };
 
   struct Base : ASTree {
     void dfs(SymTable *sym) {
       ASTree *t = adj[1];
+
       t->dfs(sym);
       check(t->l_value);
       check(is_convertible_implicit(t->type, M_INT));
 
       type = M_INT;
       l_value = false;
+      is_ptr = false;
 
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      emit("LOAD R0, (R6)");
+      compute();
+      emit("STORE R0, (R6)");
+      emit("MOVE R0, R6");
+    }
+
+    virtual void compute() = 0;
+  };
+
+  struct OP_INC__unarni_izraz : Base {
+    void compute() {
+      emit("ADD R0, 1, R0");
     }
   };
-  struct OP_INC__unarni_izraz : Base {};
-  struct OP_DEC__unarni_izraz : Base {};
+
+  struct OP_DEC__unarni_izraz : Base {
+    void compute() {
+      emit("SUB R0, 1, R0");
+    }
+  };
 
   struct unarni_operator__cast_izraz : ASTree {
     void dfs(SymTable *sym) {
@@ -253,9 +332,13 @@ namespace unarni_izraz {
 
       t_izraz->dfs(sym);
       check(is_convertible_implicit(t_izraz->type, M_INT));
+      if (t_izraz->is_ptr) {
+        emit("LOAD R6, (R6)");
+      }
 
       type = M_INT;
       l_value = false;
+      is_ptr = false;
 
       t_op->dfs(sym);
     }
@@ -298,6 +381,7 @@ namespace cast_izraz {
       type = t->type;
       fun = t->fun;
       l_value = t->l_value;
+      is_ptr = t->is_ptr;
     }
   };
 
@@ -308,13 +392,19 @@ namespace cast_izraz {
 
       t_tip->dfs(sym);
       t_cast->dfs(sym);
+      if (t_cast->is_ptr) {
+        emit("LOAD R6, (R6)");
+      }
       check(is_convertible_explicit(t_cast->type, t_tip->type));
 
       type = t_tip->type;
       fun = t_tip->fun;
       l_value = false;
+      is_ptr = false;
 
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      if (type & M_CHAR) {
+        emit("AND R6, 0FF, R6");
+      }
     }
   };
 }
@@ -334,7 +424,7 @@ namespace ime_tipa {
     void dfs(SymTable *sym) {
       ASTree *t = adj[1];
       t->dfs(sym);
-      check((t->type & M_VOID) == 0);
+      check(!(t->type & M_VOID));
 
       type = t->type | M_CONST;
       fun = t->fun;
@@ -371,6 +461,7 @@ namespace multiplikativni_izraz {
       type = t->type;
       fun = t->fun;
       l_value = t->l_value;
+      is_ptr = t->is_ptr;
     }
   };
 
@@ -381,14 +472,21 @@ namespace multiplikativni_izraz {
 
       t1->dfs(sym);
       check(is_convertible_implicit(t1->type, M_INT));
+      if (t1->is_ptr) {
+        emit("LOAD R6, (R6)");
+      }
       emit("PUSH R6");
 
       t2->dfs(sym);
       check(is_convertible_implicit(t2->type, M_INT));
+      if (t2->is_ptr) {
+        emit("LOAD R6, (R6)");
+      }
       emit("PUSH R6");
 
       type = M_INT;
       l_value = false;
+      is_ptr = false;
 
       compute();
       emit("POP R0");
@@ -417,6 +515,35 @@ namespace multiplikativni_izraz {
   };
 }
 
+struct BaseArithmetic : ASTree {
+  void dfs(SymTable *sym) {
+    ASTree *t1 = adj[0];
+    ASTree *t2 = adj[2];
+
+    t1->dfs(sym);
+    check(is_convertible_implicit(t1->type, M_INT));
+    if (t1->is_ptr) {
+      emit("LOAD R6, (R6)");
+    }
+    emit("PUSH R6");
+
+    t2->dfs(sym);
+    check(is_convertible_implicit(t2->type, M_INT));
+    if (t2->is_ptr) {
+      emit("LOAD R6, (R6)");
+    }
+
+    type = M_INT;
+    l_value = false;
+    is_ptr = false;
+
+    emit("POP R0");
+    compute();
+  }
+
+  virtual void compute() = 0;
+};
+
 namespace aditivni_izraz {
   struct multiplikativni_izraz : ASTree {
     void dfs(SymTable *sym) {
@@ -426,43 +553,56 @@ namespace aditivni_izraz {
       type = t->type;
       fun = t->fun;
       l_value = t->l_value;
+      is_ptr = t->is_ptr;
     }
   };
 
-  struct Base : ASTree {
-    void dfs(SymTable *sym) {
-      ASTree *t1 = adj[0];
-      ASTree *t2 = adj[2];
-
-      t1->dfs(sym);
-      check(is_convertible_implicit(t1->type, M_INT));
-      emit("PUSH R6");
-
-      t2->dfs(sym);
-      check(is_convertible_implicit(t2->type, M_INT));
-
-      type = M_INT;
-      l_value = false;
-
-      emit("POP R0");
-      compute();
-    }
-
-    virtual void compute() = 0;
-  };
-
-  struct aditivni_izraz__PLUS__multiplikativni_izraz : Base {
+  struct aditivni_izraz__PLUS__multiplikativni_izraz : BaseArithmetic {
     void compute() {
       emit("ADD R0, R6, R6");
     }
   };
 
-  struct aditivni_izraz__MINUS__multiplikativni_izraz : Base {
+  struct aditivni_izraz__MINUS__multiplikativni_izraz : BaseArithmetic {
     void compute() {
       emit("SUB R0, R6, R6");
     }
   };
 }
+
+struct BaseComparison : ASTree {
+  void dfs(SymTable *sym) {
+    ASTree *t1 = adj[0];
+    ASTree *t2 = adj[2];
+
+    t1->dfs(sym);
+    check(is_convertible_implicit(t1->type, M_INT));
+    if (t1->is_ptr) {
+      emit("LOAD R6, (R6)");
+    }
+    emit("PUSH R6");
+
+    t2->dfs(sym);
+    check(is_convertible_implicit(t2->type, M_INT));
+    if (t2->is_ptr) {
+      emit("LOAD R6, (R6)");
+    }
+
+    string l_out = makeLabel();
+    emit("POP R0");
+    emit("CMP R0, R6");
+    emit("MOVE 1, R6");
+    emit("JR_%s %s", cond(), l_out.c_str());
+    emit("MOVE 0, R6");
+    emitLabel(l_out.c_str());
+
+    type = M_INT;
+    l_value = false;
+    is_ptr = false;
+  }
+
+  virtual const char *cond() = 0;
+};
 
 namespace odnosni_izraz {
   struct aditivni_izraz : ASTree {
@@ -473,30 +613,33 @@ namespace odnosni_izraz {
       type = t->type;
       fun = t->fun;
       l_value = t->l_value;
+      is_ptr = t->is_ptr;
     }
   };
 
-  struct Base : ASTree {
-    void dfs(SymTable *sym) {
-      ASTree *t1 = adj[0];
-      ASTree *t2 = adj[2];
-
-      t1->dfs(sym);
-      check(is_convertible_implicit(t1->type, M_INT));
-
-      t2->dfs(sym);
-      check(is_convertible_implicit(t2->type, M_INT));
-
-      type = M_INT;
-      l_value = false;
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+  struct odnosni_izraz__OP_LT__aditivni_izraz : BaseComparison {
+    const char *cond() {
+      return "SLT";
     }
   };
-  struct odnosni_izraz__OP_LT__aditivni_izraz : Base {};
-  struct odnosni_izraz__OP_GT__aditivni_izraz : Base {};
-  struct odnosni_izraz__OP_LTE__aditivni_izraz : Base {};
-  struct odnosni_izraz__OP_GTE__aditivni_izraz : Base {};
+
+  struct odnosni_izraz__OP_GT__aditivni_izraz : BaseComparison {
+    const char *cond() {
+      return "SGT";
+    }
+  };
+
+  struct odnosni_izraz__OP_LTE__aditivni_izraz : BaseComparison {
+    const char *cond() {
+      return "SLE";
+    }
+  };
+
+  struct odnosni_izraz__OP_GTE__aditivni_izraz : BaseComparison {
+    const char *cond() {
+      return "SGE";
+    }
+  };
 }
 
 namespace jednakosni_izraz {
@@ -508,28 +651,21 @@ namespace jednakosni_izraz {
       type = t->type;
       fun = t->fun;
       l_value = t->l_value;
+      is_ptr = t->is_ptr;
     }
   };
 
-  struct Base : ASTree {
-    void dfs(SymTable *sym) {
-      ASTree *t1 = adj[0];
-      ASTree *t2 = adj[2];
-
-      t1->dfs(sym);
-      check(is_convertible_implicit(t1->type, M_INT));
-
-      t2->dfs(sym);
-      check(is_convertible_implicit(t2->type, M_INT));
-
-      type = M_INT;
-      l_value = false;
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+  struct jednakosni_izraz__OP_EQ__odnosni_izraz : BaseComparison {
+    const char *cond() {
+      return "EQ";
     }
   };
-  struct jednakosni_izraz__OP_EQ__odnosni_izraz : Base {};
-  struct jednakosni_izraz__OP_NEQ__odnosni_izraz : Base {};
+
+  struct jednakosni_izraz__OP_NEQ__odnosni_izraz : BaseComparison {
+    const char *cond() {
+      return "NE";
+    }
+  };
 }
 
 namespace bin_i_izraz {
@@ -541,24 +677,13 @@ namespace bin_i_izraz {
       type = t->type;
       fun = t->fun;
       l_value = t->l_value;
+      is_ptr = t->is_ptr;
     }
   };
 
-  struct bin_i_izraz__OP_BIN_I__jednakosni_izraz : ASTree {
-    void dfs(SymTable *sym) {
-      ASTree *t1 = adj[0];
-      ASTree *t2 = adj[2];
-
-      t1->dfs(sym);
-      check(is_convertible_implicit(t1->type, M_INT));
-
-      t2->dfs(sym);
-      check(is_convertible_implicit(t2->type, M_INT));
-
-      type = M_INT;
-      l_value = false;
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+  struct bin_i_izraz__OP_BIN_I__jednakosni_izraz : BaseArithmetic {
+    void compute() {
+      emit("AND R0, R6, R6");
     }
   };
 }
@@ -572,24 +697,13 @@ namespace bin_xili_izraz {
       type = t->type;
       fun = t->fun;
       l_value = t->l_value;
+      is_ptr = t->is_ptr;
     }
   };
 
-  struct bin_xili_izraz__OP_BIN_XILI__bin_i_izraz : ASTree {
-    void dfs(SymTable *sym) {
-      ASTree *t1 = adj[0];
-      ASTree *t2 = adj[2];
-
-      t1->dfs(sym);
-      check(is_convertible_implicit(t1->type, M_INT));
-
-      t2->dfs(sym);
-      check(is_convertible_implicit(t2->type, M_INT));
-
-      type = M_INT;
-      l_value = false;
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+  struct bin_xili_izraz__OP_BIN_XILI__bin_i_izraz : BaseArithmetic {
+    void compute() {
+      emit("XOR R0, R6, R6");
     }
   };
 }
@@ -603,27 +717,49 @@ namespace bin_ili_izraz {
       type = t->type;
       fun = t->fun;
       l_value = t->l_value;
+      is_ptr = t->is_ptr;
     }
   };
 
-  struct bin_ili_izraz__OP_BIN_ILI__bin_xili_izraz : ASTree {
-    void dfs(SymTable *sym) {
-      ASTree *t1 = adj[0];
-      ASTree *t2 = adj[2];
-
-      t1->dfs(sym);
-      check(is_convertible_implicit(t1->type, M_INT));
-
-      t2->dfs(sym);
-      check(is_convertible_implicit(t2->type, M_INT));
-
-      type = M_INT;
-      l_value = false;
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+  struct bin_ili_izraz__OP_BIN_ILI__bin_xili_izraz : BaseArithmetic {
+    void compute() {
+      emit("OR R0, R6, R6");
     }
   };
 }
+
+struct BaseLogic : ASTree {
+  void dfs(SymTable *sym) {
+    ASTree *t1 = adj[0];
+    ASTree *t2 = adj[2];
+
+    t1->dfs(sym);
+    check(is_convertible_implicit(t1->type, M_INT));
+    if (t1->is_ptr) {
+      emit("LOAD R6, (R6)");
+    }
+    emitIntToBool();
+
+    string l_out = makeLabel();
+    emit("CMP R6, 0");
+    emit("JP_%s %s", jump_test().c_str(), l_out.c_str());
+
+    t2->dfs(sym);
+    if (t2->is_ptr) {
+      emit("LOAD R6, (R6)");
+    }
+    check(is_convertible_implicit(t2->type, M_INT));
+    emitIntToBool();
+
+    emitLabel(l_out.c_str());
+
+    type = M_INT;
+    l_value = false;
+    is_ptr = false;
+  }
+
+  virtual string jump_test() = 0;
+};
 
 namespace log_i_izraz {
   struct bin_ili_izraz : ASTree {
@@ -634,24 +770,13 @@ namespace log_i_izraz {
       type = t->type;
       fun = t->fun;
       l_value = t->l_value;
+      is_ptr = t->is_ptr;
     }
   };
 
-  struct log_i_izraz__OP_I__bin_ili_izraz : ASTree {
-    void dfs(SymTable *sym) {
-      ASTree *t1 = adj[0];
-      ASTree *t2 = adj[2];
-
-      t1->dfs(sym);
-      check(is_convertible_implicit(t1->type, M_INT));
-
-      t2->dfs(sym);
-      check(is_convertible_implicit(t2->type, M_INT));
-
-      type = M_INT;
-      l_value = false;
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+  struct log_i_izraz__OP_I__bin_ili_izraz : BaseLogic {
+    string jump_test() {
+      return "EQ";
     }
   };
 }
@@ -665,24 +790,13 @@ namespace log_ili_izraz {
       type = t->type;
       fun = t->fun;
       l_value = t->l_value;
+      is_ptr = t->is_ptr;
     }
   };
 
-  struct log_ili_izraz__OP_ILI__log_i_izraz : ASTree {
-    void dfs(SymTable *sym) {
-      ASTree *t1 = adj[0];
-      ASTree *t2 = adj[2];
-
-      t1->dfs(sym);
-      check(is_convertible_implicit(t1->type, M_INT));
-
-      t2->dfs(sym);
-      check(is_convertible_implicit(t2->type, M_INT));
-
-      type = M_INT;
-      l_value = false;
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+  struct log_ili_izraz__OP_ILI__log_i_izraz : BaseLogic {
+    string jump_test() {
+      return "NE";
     }
   };
 }
@@ -696,6 +810,7 @@ namespace izraz_pridruzivanja {
       type = t->type;
       fun = t->fun;
       l_value = t->l_value;
+      is_ptr = t->is_ptr;
     }
   };
 
@@ -706,15 +821,21 @@ namespace izraz_pridruzivanja {
 
       t_left->dfs(sym);
       check(t_left->l_value);
+      emit("PUSH R6");
 
       t_right->dfs(sym);
       check(is_convertible_implicit(t_right->type, t_left->type));
+      if (t_right->is_ptr) {
+        emit("LOAD R6, (R6)");
+      }
 
       type = t_left->type;
       fun = t_left->fun;
       l_value = false;
+      is_ptr = false;
 
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      emit("POP R0");
+      emit("STORE R6, (R0)");
     }
   };
 }
@@ -728,6 +849,7 @@ namespace izraz {
       type = t->type;
       fun = t->fun;
       l_value = t->l_value;
+      is_ptr = t->is_ptr;
     }
   };
 
@@ -742,8 +864,7 @@ namespace izraz {
       type = t2->type;
       fun = t2->fun;
       l_value = false;
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      is_ptr = t2->is_ptr;
     }
   };
 }
@@ -782,12 +903,12 @@ namespace naredba {
   struct slozena_naredba : ASTree {
     void dfs(SymTable *sym) {
       ASTree *t = adj[0];
-      sym = sym->extend();
-      t->dfs(sym);
+      t->dfs(sym->extend());
 
       type = t->type;
       fun = t->fun;
       l_value = t->l_value;
+      is_ptr = t->is_ptr;
     }
   };
 
@@ -799,6 +920,7 @@ namespace naredba {
       type = t->type;
       fun = t->fun;
       l_value = t->l_value;
+      is_ptr = t->is_ptr;
     }
   };
   struct izraz_naredba : Base {};
@@ -821,6 +943,7 @@ namespace izraz_naredba {
 
       type = t->type;
       fun = t->fun;
+      is_ptr = t->is_ptr;
     }
   };
 }
@@ -833,10 +956,16 @@ namespace naredba_grananja {
 
       t_if->dfs(sym);
       check(is_convertible_implicit(t_if->type, M_INT));
+      if (t_if->is_ptr) {
+        emit("LOAD R6, (R6)");
+      }
+
+      string l_out = makeLabel();
+      emit("CMP R6, 0");
+      emit("JR_EQ %s", l_out.c_str());
 
       t_then->dfs(sym);
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      emitLabel(l_out.c_str());
     }
   };
 
@@ -848,11 +977,17 @@ namespace naredba_grananja {
 
       t_if->dfs(sym);
       check(is_convertible_implicit(t_if->type, M_INT));
+      if (t_if->is_ptr) {
+        emit("LOAD R6, (R6)");
+      }
+
+      string l_out = makeLabel();
+      emit("CMP R6, 0");
+      emit("JR_EQ %s", l_out.c_str());
 
       t_then->dfs(sym);
+      emitLabel(l_out.c_str());
       t_else->dfs(sym);
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -864,11 +999,25 @@ namespace naredba_petlje {
       ASTree *t_while = adj[2];
       ASTree *t_do = adj[4];
 
+      string l_in = makeLabel();
+      string l_out = makeLabel();
+      sym->addLoop(l_in, l_out);
+
+      emitLabel(l_in.c_str());
       t_while->dfs(sym);
+      if (t_while->is_ptr) {
+        emit("LOAD R6, (R6)");
+      }
+      emit("CMP R6, 0");
+      emit("JR_EQ %s", l_out.c_str());
+
       check(is_convertible_implicit(t_while->type, M_INT));
       t_do->dfs(sym);
+      emit("JR %s", l_in.c_str());
 
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      fflush(stdout);
+      emitLabel(l_out.c_str());
+      sym->removeLoop();
     }
   };
 
@@ -880,11 +1029,26 @@ namespace naredba_petlje {
       ASTree *t_do = adj[5];
 
       t_start->dfs(sym);
-      t_test->dfs(sym);
-      check(is_convertible_implicit(t_test->type, M_INT));
-      t_do->dfs(sym);
 
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      string l_test = makeLabel();
+      string l_out = makeLabel();
+      sym->addLoop(l_test, l_out);
+
+      emitLabel(l_test.c_str());
+      emit("MOVE 1, R6");
+      t_test->dfs(sym);
+      if (t_test->is_ptr) {
+        emit("LOAD R6, (R6)");
+      }
+      check(is_convertible_implicit(t_test->type, M_INT));
+      emit("CMP R6, 0");
+      emit("JR_EQ %s", l_out.c_str());
+
+      t_do->dfs(sym);
+      emit("JR %s", l_test.c_str());
+
+      emitLabel(l_out.c_str());
+      sym->removeLoop();
     }
   };
 
@@ -897,43 +1061,58 @@ namespace naredba_petlje {
       ASTree *t_do = adj[6];
 
       t_start->dfs(sym);
-      t_test->dfs(sym);
-      check(is_convertible_implicit(t_test->type, M_INT));
-      t_step->dfs(sym);
-      t_do->dfs(sym);
 
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      string l_test = makeLabel();
+      string l_step = makeLabel();
+      string l_do = makeLabel();
+      string l_out = makeLabel();
+      sym->addLoop(l_step, l_out);
+
+      emitLabel(l_test.c_str());
+      emit("MOVE 1, R6");
+      t_test->dfs(sym);
+      if (t_test->is_ptr) {
+        emit("LOAD R6, (R6)");
+      }
+      check(is_convertible_implicit(t_test->type, M_INT));
+      emit("CMP R6, 0");
+      emit("JR_NE %s", l_do.c_str());
+      emit("JR %s", l_out.c_str());
+
+      emitLabel(l_step.c_str());
+      t_step->dfs(sym);
+      emit("JR %s", l_test.c_str());
+
+      emitLabel(l_do.c_str());
+      t_do->dfs(sym);
+      emit("JR %s", l_step.c_str());
+
+      emitLabel(l_out.c_str());
+      sym->removeLoop();
     }
   };
 }
 
 namespace naredba_skoka {
-  struct Base : ASTree {
+  struct KR_CONTINUE__TOCKAZAREZ : ASTree {
     void dfs(SymTable *sym) {
-      ASTree *f = this;
-      while (f) {
-        if (f->is_loop) break;
-        f = f->dad;
-      }
-      check(f);
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      check(sym->insideLoop());
+      emit("JR %s", sym->getContinue().c_str());
     }
   };
-  struct KR_CONTINUE__TOCKAZAREZ : Base {};
-  struct KR_BREAK__TOCKAZAREZ : Base {};
+
+  struct KR_BREAK__TOCKAZAREZ : ASTree {
+    void dfs(SymTable *sym) {
+      check(sym->insideLoop());
+      emit("JR %s", sym->getBreak().c_str());
+    }
+  };
 
   struct KR_RETURN__TOCKAZAREZ : ASTree {
     void dfs(SymTable *sym) {
-      ASTree *f = this;
-      while (f) {
-        if (f->type == M_FUNCTION) break;
-        f = f->dad;
-      }
-      check(f);
-      check(f->fun->type == M_VOID);
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      check(sym->fun);
+      check(sym->fun->type == M_VOID);
+      emitFunctionEnd();
     }
   };
 
@@ -941,16 +1120,13 @@ namespace naredba_skoka {
     void dfs(SymTable *sym) {
       ASTree *t = adj[1];
       t->dfs(sym);
-
-      ASTree *f = this;
-      while (f) {
-        if (f->type == M_FUNCTION) break;
-        f = f->dad;
+      if (t->is_ptr) {
+        emit("LOAD R6, (R6)");
       }
-      check(f);
-      check(is_convertible_implicit(t->type, f->fun->type));
 
-      emit("RET");
+      check(sym->fun);
+      check(is_convertible_implicit(t->type, sym->fun->type));
+      emitFunctionEnd();
     }
   };
 }
@@ -973,6 +1149,7 @@ namespace prijevodna_jedinica {
 namespace vanjska_deklaracija {
   struct Base : ASTree {
     void dfs(SymTable *sym) {
+      emit();
       adj[0]->dfs(sym);
     }
   };
@@ -992,16 +1169,19 @@ namespace definicija_funkcije {
       type = M_FUNCTION;
       fun = new Function;
       fun->type = t_tip->type;
-      check((fun->type & M_CONST) == 0);
+      check(!(fun->type & M_CONST));
 
       string name = t_idn->source;
       ASTree *f = sym->get(name);
 
-      emit();
       emitLabel("FUN_%s", name.c_str());
+      emitFunctionStart();
 
       sym = sym->extend();
+      sym->fun = fun;
       init_args(sym);
+      sym->push();
+      sym->base_pointer = sym->push();
 
       check(fun_def.get(name) == NULL);
       if (f) {
@@ -1014,6 +1194,8 @@ namespace definicija_funkcije {
       sym->dad->put(name, this);
 
       t_naredba->dfs(sym);
+
+      emitFunctionEnd();
     }
 
     virtual void init_args(SymTable *sym) = 0;
@@ -1028,8 +1210,6 @@ namespace definicija_funkcije {
       ASTree *t = adj[3];
       t->dfs(sym);
       fun->args = *t->arg_types;
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -1041,8 +1221,7 @@ namespace lista_parametara {
 
       check(sym->getLocal(t->arg_name) == NULL);
       sym->put(t->arg_name, t);
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      t->stack_pos = sym->push();
     }
   };
 
@@ -1053,8 +1232,6 @@ namespace lista_parametara {
 
       arg_types = new vector<int>;
       addParam(sym, t);
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -1068,8 +1245,6 @@ namespace lista_parametara {
 
       t_param->dfs(sym);
       addParam(sym, t_param);
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -1082,11 +1257,9 @@ namespace deklaracija_parametra {
 
       t_tip->dfs(sym);
       type = t_tip->type;
-      check((type & M_VOID) == 0);
+      check(!(type & M_VOID));
 
       arg_name = t_idn->source;
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -1097,11 +1270,9 @@ namespace deklaracija_parametra {
 
       t_tip->dfs(sym);
       type = t_tip->type | M_ARRAY;
-      check((type & M_VOID) == 0);
+      check(!(type & M_VOID));
 
       arg_name = t_idn->source;
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -1110,8 +1281,6 @@ namespace lista_deklaracija {
   struct deklaracija : ASTree {
     void dfs(SymTable *sym) {
       adj[0]->dfs(sym);
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -1119,8 +1288,6 @@ namespace lista_deklaracija {
     void dfs(SymTable *sym) {
       adj[0]->dfs(sym);
       adj[1]->dfs(sym);
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -1131,11 +1298,18 @@ namespace deklaracija {
       ASTree *t_tip = adj[0];
       ASTree *t_lista = adj[1];
 
+      if (sym->dad == NULL) {
+        emitLabel(l_global.c_str());
+      }
+
       t_tip->dfs(sym);
       t_lista->type_inherited = t_tip->type;
       t_lista->dfs(sym);
 
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      if (sym->dad == NULL) {
+        l_global = makeLabel();
+        emit("JR %s", l_global.c_str());
+      }
     }
   };
 }
@@ -1146,8 +1320,6 @@ namespace lista_init_deklaratora {
       ASTree *t = adj[0];
       t->type_inherited = type_inherited;
       t->dfs(sym);
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -1161,8 +1333,6 @@ namespace lista_init_deklaratora {
 
       t_dekl->type_inherited = type_inherited;
       t_dekl->dfs(sym);
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -1174,9 +1344,7 @@ namespace init_deklarator {
       t->type_inherited = type_inherited;
       t->dfs(sym);
 
-      check((t->type & M_CONST) == 0);
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      check(!(t->type & M_CONST));
     }
   };
 
@@ -1203,8 +1371,6 @@ namespace init_deklarator {
       } else {
         check(is_convertible_implicit(t_value->type, t_dekl->type));
       }
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -1215,12 +1381,24 @@ namespace izravni_deklarator {
       string name = adj[0]->source;
 
       type = type_inherited;
-      check((type & M_VOID) == 0);
+      check(!(type & M_VOID));
       check(sym->getLocal(name) == NULL);
 
       sym->put(name, this);
+      stack_pos = sym->push();
+      is_global_decl = sym->dad == NULL;
 
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      if (sym->dad) {
+        emit("SUB SP, 4, SP");
+      } else {
+        string l_out = makeLabel();
+        emit("JR %s", l_out.c_str());
+        emitLabel("G_%s", name.c_str());
+        emit("DW 0");
+        emitLabel(l_out.c_str());
+        emit("MOVE G_%s, R6", name.c_str());
+        emit("PUSH R6");
+      }
     }
   };
 
@@ -1229,20 +1407,39 @@ namespace izravni_deklarator {
       ASTree *t_idn = adj[0];
       ASTree *t_broj = adj[2];
 
-      check((type_inherited & M_VOID) == 0);
+      check(!(type_inherited & M_VOID));
       type = type_inherited | M_ARRAY;
 
       string name = t_idn->source;
       check(sym->getLocal(name) == NULL);
       sym->put(name, this);
+      is_global_decl = sym->dad == NULL;
 
       int num;
       check(parseInt(t_broj->source, num));
       check(num > 0 && num <= 1024);
 
       array_size = num;
+      sym->push(array_size);
+      stack_pos = sym->push();
 
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      if (sym->dad) {
+        emit("SUB SP, %%D %d, SP", array_size * 4);
+        emit("MOVE SP, R0");
+        emit("PUSH R0");
+      } else {
+        is_global_decl = true;
+
+        string l_out = makeLabel();
+        emit("JR %s", l_out.c_str());
+        emitLabel("G_%s", name.c_str());
+        emit("DW G_%s", name.c_str());
+        emit("`DS %%D %d", array_size * 4);
+        emitLabel(l_out.c_str());
+        emit("LOAD R0, (G_%s)", name.c_str());
+        emit("ADD R0, 4, R0");
+        emit("STORE R0, (G_%s)", name.c_str());
+      }
     }
   };
 
@@ -1261,8 +1458,7 @@ namespace izravni_deklarator {
 
       fun_declared.insert(make_pair(name, fun));
       sym->put(name, this);
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      is_global_decl = sym->dad == NULL;
     }
   };
 
@@ -1287,8 +1483,7 @@ namespace izravni_deklarator {
 
       fun_declared.insert(make_pair(name, fun));
       sym->put(name, this);
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      is_global_decl = sym->dad == NULL;
     }
   };
 }
@@ -1297,8 +1492,11 @@ namespace inicijalizator {
   struct izraz_pridruzivanja : ASTree {
     void dfs(SymTable *sym) {
       ASTree *t = adj[0];
-      t->dfs(sym);
 
+      t->dfs(sym);
+      if (t->is_ptr) {
+        emit("LOAD R6, (R6)");
+      }
       type = t->type;
       fun = t->fun;
 
@@ -1314,7 +1512,12 @@ namespace inicijalizator {
         }
       }
 
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      if (sym->dad) {
+        emit("STORE R6, (SP)");
+      } else {
+        emit("POP R0");
+        emit("STORE R6, (R0)");
+      }
     }
   };
 
@@ -1323,8 +1526,6 @@ namespace inicijalizator {
       ASTree *t = adj[1];
       t->dfs(sym);
       arg_types = t->arg_types;
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }
@@ -1333,12 +1534,17 @@ namespace lista_izraza_pridruzivanja {
   struct izraz_pridruzivanja : ASTree {
     void dfs(SymTable *sym) {
       ASTree *t = adj[0];
+
+      emit("PUSH R0");
       t->dfs(sym);
+      if (t->is_ptr) {
+        emit("LOAD R6, (R6)");
+      }
+      emit("POP R0");
+      emit("STORE R6, (R0)");
 
       arg_types = new vector<int>;
       arg_types->push_back(t->type);
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 
@@ -1348,12 +1554,17 @@ namespace lista_izraza_pridruzivanja {
       ASTree *t_izraz = adj[2];
 
       t_lista->dfs(sym);
+      emit("ADD R0, 4, R0");
+      emit("PUSH R0");
       t_izraz->dfs(sym);
+      if (t_izraz->is_ptr) {
+        emit("LOAD R6, (R6)");
+      }
+      emit("POP R0");
+      emit("STORE R6, (R0)");
 
       arg_types = t_lista->arg_types;
       arg_types->push_back(t_izraz->type);
-
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
     }
   };
 }

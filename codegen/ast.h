@@ -23,8 +23,11 @@ struct ASTree {
   int type;
   Function *fun;
   bool l_value;
+  bool is_ptr;
   int type_inherited;
   bool is_loop;
+  bool is_global_decl;
+  int stack_pos;
 
   int array_size;
   vector<int> *arg_types;
@@ -36,8 +39,10 @@ struct ASTree {
     type = 0;
     fun = NULL;
     l_value = false;
+    is_ptr = false;
     type_inherited = 0;
     is_loop = false;
+    is_global_decl = false;
 
     arg_types = NULL;
   }
