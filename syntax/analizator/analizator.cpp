@@ -69,7 +69,7 @@ string getOriginal(string line) {
   return line.substr(i+1);
 }
 
-void runParser() {
+bool runParser() {
   vector<string> lines;
   for (string line; getline(cin, line); lines.push_back(line));
   lines.push_back("#");
@@ -77,6 +77,7 @@ void runParser() {
   stack<Node*> tree;
   stack<int> stk;
   stk.push(0);
+  bool ok = true;
 
   for (vector<string>::iterator it = lines.begin(); it != lines.end(); ) {
     string token = getToken(*it);
@@ -85,6 +86,8 @@ void runParser() {
     Action a = TAction[state][token];
 
     if (a.type == ERROR) {
+      ok = false;
+
       stringstream ss(*it);
       cerr << getLineNumber(*it) << ": error at `" << getOriginal(*it) << "`" << endl;
       cerr << "received: " << token << endl;
@@ -132,6 +135,8 @@ void runParser() {
       break;
     }
   }
+
+  return ok;
 }
 
 int main(void) {
@@ -156,6 +161,5 @@ int main(void) {
     }
   }
 
-  runParser();
-  return 0;
+  return runParser() ? 0 : 1;
 }

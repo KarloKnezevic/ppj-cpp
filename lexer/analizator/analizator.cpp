@@ -17,6 +17,7 @@ int main(void) {
   char *src = readInput(stdin);
   int state = Lang::initState;
   int line = 1;
+  bool ok = true;
 
   while (*src) {
     char *next = 0;
@@ -32,6 +33,7 @@ int main(void) {
     }
 
     if (next == 0) {
+      ok = false;
       cerr << line << ": error: unexpected char `" << *src << "`" << endl;
       ++src;
       continue;
@@ -55,5 +57,5 @@ int main(void) {
     src = next;
   }
 
-  return 0;
+  return ok ? 0 : 1;
 }

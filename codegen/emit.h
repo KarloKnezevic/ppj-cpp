@@ -21,4 +21,6 @@ void emitIntToBool();
 void emitFunctionStart();
 void emitFunctionEnd();
 
+void outputCode();
+
 #endif

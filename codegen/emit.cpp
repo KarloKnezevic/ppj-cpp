@@ -2,22 +2,25 @@
 #include <cstdarg>
 
 #include <sstream>
+#include <iostream>
 
 #include "emit.h"
 
 string l_global = makeLabel();
 
+ostringstream code;
+static char buffer[1000];
+
 void emit() {
-  printf("\n");
+  code << '\n';
 }
 
 void emit(const char *format, ...) {
   va_list args;
   va_start(args, format);
 
-  printf("\t");
-  vprintf(format, args);
-  printf("\n");
+  vsprintf(buffer, format, args);
+  code << '\t' << buffer << '\n';
 
   va_end(args);
 }
@@ -35,8 +38,8 @@ void emitLabel(const char *format, ...) {
   va_list args;
   va_start(args, format);
 
-  vprintf(format, args);
-  printf("\n");
+  vsprintf(buffer, format, args);
+  code << buffer << '\n';
 
   va_end(args);
 }
@@ -57,4 +60,8 @@ void emitFunctionEnd() {
   emit("MOVE R5, SP");
   emit("POP R5");
   emit("RET");
+}
+
+void outputCode() {
+  cout << code.str();
 }

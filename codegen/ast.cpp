@@ -504,13 +504,13 @@ namespace multiplikativni_izraz {
 
   struct multiplikativni_izraz__OP_DIJELI__cast_izraz : Base {
     void compute() {
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      emit("CALL DIV");
     }
   };
 
   struct multiplikativni_izraz__OP_MOD__cast_izraz : Base {
     void compute() {
-      fprintf(stderr, "missing codegen! %d\n", __LINE__);
+      emit("CALL MOD");
     }
   };
 }

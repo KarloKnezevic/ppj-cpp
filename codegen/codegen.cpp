@@ -113,6 +113,62 @@ void emitPreamble() {
   emit("JR MUL_LOOP");
   emitLabel("MUL_OUT");
   emit("RET");
+
+  emit();
+  emitLabel("DIV");
+  emit("LOAD R0, (SP+8)");
+  emit("LOAD R1, (SP+4)");
+  emit("MOVE 0, R2");
+  emit("MOVE 0, R6");
+  emit("CMP R0, 0");
+  emit("JR_SGT DIV_NEXT");
+  emit("XOR R2, 1, R2");
+  emit("SUB R6, R0, R0");
+  emitLabel("DIV_NEXT");
+  emit("CMP R1, 0");
+  emit("JR_SGT DIV_LOOP");
+  emit("XOR R2, 1, R2");
+  emit("SUB R6, R1, R1");
+  emitLabel("DIV_LOOP");
+  emit("CMP R0, R1");
+  emit("JR_SLT DIV_OUT");
+  emit("SUB R0, R1, R0");
+  emit("ADD R6, 1, R6");
+  emit("JR DIV_LOOP");
+  emitLabel("DIV_OUT");
+  emit("CMP R2, 0");
+  emit("JR_EQ DIV_RET");
+  emit("MOVE 0, R2");
+  emit("SUB R2, R6, R6");
+  emitLabel("DIV_RET");
+  emit("RET");
+
+  emit();
+  emitLabel("MOD");
+  emit("LOAD R0, (SP+8)");
+  emit("LOAD R1, (SP+4)");
+  emit("MOVE 0, R3");
+  emit("MOVE 0, R2");
+  emit("CMP R1, 0");
+  emit("JR_SGE MOD_NEXT");
+  emit("SUB R3, R1, R1");
+  emitLabel("MOD_NEXT");
+  emit("CMP R0, 0");
+  emit("JR_SGE MOD_LOOP");
+  emit("MOVE 1, R2");
+  emit("SUB R3, R0, R0");
+  emitLabel("MOD_LOOP");
+  emit("CMP R0, R1");
+  emit("JR_SLT MOD_OUT");
+  emit("SUB R0, R1, R0");
+  emit("JR MOD_LOOP");
+  emitLabel("MOD_OUT");
+  emit("MOVE R0, R6");
+  emit("CMP R2, 0");
+  emit("JR_EQ MOD_RET");
+  emit("SUB R3, R6, R6");
+  emitLabel("MOD_RET");
+  emit("RET");
 }
 
 int main() {
@@ -146,6 +202,8 @@ int main() {
     ast->check(f, ERR_FUN);
     ast->check(*f->fun == *fun, ERR_FUN);
   }
+
+  outputCode();
 
   return 0;
 }
