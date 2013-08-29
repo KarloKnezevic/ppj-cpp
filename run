@@ -1,12 +1,14 @@
 #!/bin/bash
 
-lex=`cat $1 | ./lexer/analizator/analizator`
+DIR=$(dirname $(readlink -f $0))
+
+lex=`cat $1 | "$DIR/lexer/analizator/analizator"`
 if [[ $? -ne 0 ]]; then exit 1; fi
 
-syn=`echo "$lex" | ./syntax/analizator/analizator`
+syn=`echo "$lex" | "$DIR/syntax/analizator/analizator"`
 if [[ $? -ne 0 ]]; then exit 1; fi
 
-asm=`echo "$syn" | ./codegen/codegen`
+asm=`echo "$syn" | "$DIR/codegen/codegen"`
 if [[ $? -ne 0 ]]; then exit 1; fi
 
-echo "$asm" | node frisc/main.js 2>&1 | tail -1
+echo "$asm" | node "$DIR/frisc/main.js" 2>&1 | tail -1
